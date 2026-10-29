@@ -1,0 +1,6 @@
+services:
+  pluviometrie:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8501:8501"  # accessible seulement depuis le VPS (via le reverse proxy)
