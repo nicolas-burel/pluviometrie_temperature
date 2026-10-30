@@ -71,7 +71,22 @@ def axe_jours(**options):
                  axis=alt.Axis(format="%d/%m", labelAngle=-45), **options)
 
 
-INFO_DATE = alt.Tooltip("date:T", title="Date", format="%d/%m/%Y")
+def avec_selection(data, *couches):
+    """Ajoute aux couches du graphique une colonne par jour, sur toute la hauteur.
+    Toucher (mobile) ou cliquer un jour : la colonne est surlignée et la colonne
+    'detail' de data s'affiche en haut à gauche du graphique."""
+    jour = alt.selection_point(fields=["jour"], on="click", empty=False)
+    zones = alt.Chart(data).mark_bar(width=alt.RelativeBandSize(1)).encode(
+        x=axe_jours(),
+        opacity=alt.condition(jour, alt.value(0.2), alt.value(0.01)),  # quasi invisible sauf si choisi
+        tooltip=alt.Tooltip("detail:N", title="Détail"),  # survol à la souris
+    ).add_params(jour)
+    texte = alt.Chart(data).mark_text(
+        align="left", baseline="top", dx=4, dy=4, fontSize=14, fontWeight="bold", color="#ff4b4b",
+    ).encode(x=alt.value(0), y=alt.value(0), text="detail:N").transform_filter(jour)
+    return alt.layer(*couches, zones, texte)
+
+
 BARRE = alt.RelativeBandSize(0.8)  # chaque barre occupe 80 % de la largeur d'un jour
 
 
@@ -81,7 +96,7 @@ st.title("🌧️ Pluviométrie récente")
 
 col1, col2 = st.columns(2)
 cp = col1.text_input("Code postal", max_chars=5)
-nb_jours = col2.number_input("Nombre de jours", 1, 365, 15)
+nb_jours = col2.number_input("Nombre de jours", 1, 365, 30)
 if not re.fullmatch(r"\d{5}", cp or ""):
     st.stop()
 
@@ -125,14 +140,11 @@ c3.metric("Jour le plus pluvieux", f"{pluie.max():.1f} mm", pluie.idxmax().strft
           delta_color="off")
 
 graph = pluie.rename("mm").reset_index()
-st.altair_chart(
-    alt.Chart(graph).mark_bar(width=BARRE).encode(
-        x=axe_jours(),
-        y=alt.Y("mm:Q", title="Pluie (mm)"),
-        tooltip=[INFO_DATE, alt.Tooltip("mm:Q", title="Pluie (mm)")],
-    ),
-    use_container_width=True,  # toute la largeur de la page
-)
+graph["jour"] = graph.date.dt.strftime("%d/%m/%Y")  # clé unique du jour
+graph["detail"] = graph.jour + " : " + graph.mm.map("{:.1f} mm".format)
+barres = alt.Chart(graph).mark_bar(width=BARRE).encode(x=axe_jours(), y=alt.Y("mm:Q", title="Pluie (mm)"))
+st.altair_chart(avec_selection(graph, barres), use_container_width=True)  # toute la largeur
+st.caption("Touchez ou cliquez un jour pour voir son détail.")
 st.caption(f"{len(pluie)} jours relevés sur {nb_jours} – dernier relevé le {pluie.index.max():%d/%m/%Y}.")
 
 # --- Température ---
@@ -161,18 +173,17 @@ if not avec_temp.empty:
               delta_color="off")
 
     graph = temps.reset_index()
-    base = alt.Chart(graph).encode(
-        tooltip=[INFO_DATE,
-                 alt.Tooltip("TN:Q", title="Min (°C)"),
-                 alt.Tooltip("TM:Q", title="Moyenne (°C)", format=".1f"),
-                 alt.Tooltip("TX:Q", title="Max (°C)")],
-    )
+    graph["jour"] = graph.date.dt.strftime("%d/%m/%Y")  # clé unique du jour
+    fmt = "{:.1f}".format
+    graph["detail"] = (graph.jour + " : min " + graph.TN.map(fmt) + " / moy " + graph.TM.map(fmt)
+                       + " / max " + graph.TX.map(fmt) + " °C")
+    base = alt.Chart(graph)
     plage = base.mark_bar(width=BARRE, opacity=0.35, color="#f28e2b").encode(
         x=axe_jours(), y=alt.Y("TN:Q", title="°C", scale=alt.Scale(zero=False)), y2="TX:Q")
     # bandPosition=0.5 : point de la moyenne au milieu de la barre du jour
     moyenne = base.mark_line(point=True, color="#d62728").encode(
         x=axe_jours(bandPosition=0.5), y="TM:Q")
-    st.altair_chart(plage + moyenne, use_container_width=True)
+    st.altair_chart(avec_selection(graph, plage, moyenne), use_container_width=True)
     st.caption("Barre : de la min à la max du jour – ligne : moyenne.")
 
 # --- Détail ---
